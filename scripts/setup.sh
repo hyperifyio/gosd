@@ -4,6 +4,7 @@
 #
 
 UBUNTU_ISO_URL='https://releases.ubuntu.com/22.04.3/ubuntu-22.04.3-live-server-amd64.iso'
+UBUNTU_SEED_ISO_FILE_NAME='ubuntu-seed.iso'
 SERVER_IMAGE_TYPE='qcow2'
 SERVER_IMAGE_FILE="ubuntu-server"
 SERVER_IMAGE_SIZE='20G'
@@ -76,71 +77,191 @@ else
     fi
 fi
 
-# Check and download public keys
-for KEY in "${KEYS[@]}"; do
-    if gpg --list-keys "${KEY}" > /dev/null 2>&1; then
-        :
-    else
-        echo >&2
-        echo "ERROR: GPG Public key ${KEY} for Ubuntu ISO not found. You can add it using one of these:" >&2
-        echo >&2
-        for KEYSERVER in "${KEYSERVERS[@]}"; do
-            echo "    gpg --keyid-format long --keyserver hkp://${KEYSERVER} --recv-keys ${KEY}" >&2
-            echo >&2
-        done
-        exit 2
-    fi
-done
-
-if gpg --keyid-format long --verify "${DOWNLOADS_DIR}/SHA256SUMS.gpg" "${DOWNLOADS_DIR}/SHA256SUMS"; then
-    :
-else
-    echo >&2
-    echo "ERROR: GPG verification failed for: ${DOWNLOADS_DIR}/SHA256SUMS" >&2
-    echo >&2
-    exit 3
-fi
-
-if (cd ${DOWNLOADS_DIR} && shasum --ignore-missing -a 256 -c "./SHA256SUMS") 2>&1; then
-    :
-else
-    echo >&2
-    echo "ERROR: SHA256 verification failed for: ${DOWNLOADS_DIR}/SHA256SUMS" >&2
-    echo >&2
-    exit 4
-fi
-
 set -x
 set -e
 
-UBUNTU_ISO_FILE_NAME="$(basename "${UBUNTU_ISO_URL}")"
-
-# Download Ubuntu Server ISO
-if test -f "${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}"; then
-    echo "Using previous ISO image: ${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}"
-else
-    echo "Downloading ISO image as: ${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}"
-    wget -O "${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}" "${UBUNTU_ISO_URL}"
-fi
-
-# Check if VM image exists already
 if test -f "${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE}"; then
-    echo "ERROR: Server image exists already: ${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE}"
-    exit 2
+    echo 'Using previous image'
+else
+
+    # Check if VM image exists already
+    if test -f "${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE}"; then
+        echo "ERROR: Server image exists already: ${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE}"
+        exit 2
+    fi
+
+    # Download Ubuntu Server ISO
+    UBUNTU_ISO_FILE_NAME="$(basename "${UBUNTU_ISO_URL}")"
+    if test -f "${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}"; then
+        echo "Using previous ISO image: ${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}"
+    else
+        echo "Downloading ISO image as: ${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}"
+        wget -O "${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}" "${UBUNTU_ISO_URL}"
+    fi
+
+    # Check and download public keys
+    for KEY in "${KEYS[@]}"; do
+        if gpg --list-keys "${KEY}" > /dev/null 2>&1; then
+            :
+        else
+            echo >&2
+            echo "ERROR: GPG Public key ${KEY} for Ubuntu ISO not found. You can add it using one of these:" >&2
+            echo >&2
+            for KEYSERVER in "${KEYSERVERS[@]}"; do
+                echo "    gpg --keyid-format long --keyserver hkp://${KEYSERVER} --recv-keys ${KEY}" >&2
+                echo >&2
+            done
+            exit 2
+        fi
+    done
+
+    echo 'Verifying ISO images...'
+    if gpg --keyid-format long --verify "${DOWNLOADS_DIR}/SHA256SUMS.gpg" "${DOWNLOADS_DIR}/SHA256SUMS"; then
+        echo 'ISO images OK'
+    else
+        echo >&2
+        echo "ERROR: GPG verification failed for: ${DOWNLOADS_DIR}/SHA256SUMS" >&2
+        echo >&2
+        exit 3
+    fi
+
+    if (cd ${DOWNLOADS_DIR} && shasum --ignore-missing -a 256 -c "./SHA256SUMS") 2>&1; then
+        :
+    else
+        echo >&2
+        echo "ERROR: SHA256 verification failed for: ${DOWNLOADS_DIR}/SHA256SUMS" >&2
+        echo >&2
+        exit 4
+    fi
+
+    # Create a new VM disk image
+    echo 'Creating image... '
+    qemu-img create \
+        -f "${SERVER_IMAGE_TYPE}" \
+        "${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE}" \
+        "${SERVER_IMAGE_SIZE}"
+
+    # Run QEMU with expect using a here document
+    echo 'Installing system... '
+    expect << END_EXPECT
+
+    match_max 30000
+
+    set down   "\016"
+    set end    "\005"
+    set left   "\002"
+    set home   "\001"
+    set ctrl_x "\030"
+    set ctrl_l "\014"
+
+    proc wait_for_pattern {expected_pattern timeout max_loops timeout_after} {
+        global spawn_id
+        global ctrl_l
+        set timeout \$timeout
+        set loop_counter 0
+        while {\$loop_counter < \$max_loops} {
+            expect {
+                \$expected_pattern {
+                    break
+                }
+                timeout {
+                    send \$ctrl_l
+                    incr loop_counter
+                }
+                eof {
+                    send_user "\nEOF detected while waiting pattern \$expected_pattern\n"
+                    exit 2
+                }
+            }
+        }
+        if {\$loop_counter >= \$max_loops} {
+            send_user "Maximum number of retries reached while waiting pattern \$expected_pattern. Exiting.\n"
+            exit 1
+        }
+        set timeout \$timeout_after
+    }
+
+    set timeout 20
+
+    spawn qemu-system-x86_64 \
+        -cpu max \
+        -nographic \
+        -no-reboot \
+        -m 4096 \
+        -boot d \
+        -net user,hostfwd=tcp::10022-:22 \
+        -net nic \
+        -cdrom "${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}" \
+        -drive "file=${WORKING_DIR}/${IMAGES_DIR}/${UBUNTU_SEED_ISO_FILE_NAME},format=raw" \
+        -drive "file=${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE},format=${SERVER_IMAGE_TYPE},if=virtio"
+
+    match_max -i \$spawn_id 30000
+
+    sleep 1
+
+    wait_for_pattern " to edit the commands" 20 10 60
+    sleep 1
+
+    send "e"
+    wait_for_pattern "/casper/vmlinuz  ---" 20 10 60
+    sleep 1
+
+    send "\$down\$down\$down\$end\$left\$left\$left\$left"
+    send "auto\$ctrl_l"
+    wait_for_pattern "/casper/vmlinuz auto ---" 20 10 60
+    sleep 1
+
+    send "install\$ctrl_l"
+    wait_for_pattern "/casper/vmlinuz autoinstall ---" 20 10 60
+    sleep 1
+
+    send " text\$ctrl_l"
+    wait_for_pattern "/casper/vmlinuz autoinstall text ---" 20 10 60
+    sleep 1
+
+    send " console=\$ctrl_l"
+    wait_for_pattern "/casper/vmlinuz autoinstall text console= ---" 20 10 60
+    sleep 1
+
+    send "ttyS0,115200\$down"
+    wait_for_pattern "/casper/vmlinuz autoinstall text console=ttyS0,115200 " 20 10 60
+    sleep 1
+
+    send "\$ctrl_x"
+    wait_for_pattern "Booting a command list" 600 10 600
+    wait_for_pattern "0.000000] Linux version" 600 10 600
+    wait_for_pattern "waiting for cloud-init..." 600 10 600
+    wait_for_pattern "reboot: Restarting system" 600 10 600
+
+    expect eof
+    send_user "Installation ready"
+    exit 0
+
+END_EXPECT
 fi
 
-# Create a new VM disk image
-qemu-img create \
-    -f "${SERVER_IMAGE_TYPE}" \
-    "${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE}" \
-    "${SERVER_IMAGE_SIZE}"
+cleanup() {
+    echo "Shutting down QEMU..."
+    # Gracefully shutdown QEMU (e.g., via QEMU monitor or sending kill signal)
+    kill $QEMU_PID
+}
 
-# Start the VM and install Ubuntu there
-# (This step will require manual intervention to complete the installation)
-qemu-system-x86_64 \
-    -boot d \
-    -cdrom "${WORKING_DIR}/${DOWNLOADS_DIR}/${UBUNTU_ISO_FILE_NAME}" \
-    -drive "file=${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE},format=${SERVER_IMAGE_TYPE}"
+#echo 'Starting the system'
+#qemu-system-x86_64 \
+#    -cpu max \
+#    -no-reboot \
+#    -m 4096 \
+#    -net user,hostfwd=tcp::10022-:22 \
+#    -net nic \
+#    -drive "file=${WORKING_DIR}/${IMAGES_DIR}/${SERVER_IMAGE_FILE}.${SERVER_IMAGE_TYPE},format=${SERVER_IMAGE_TYPE},if=virtio" &
+#QEMU_PID=$!
+#trap cleanup EXIT
+
+#ansible all -i "localhost:10022," \
+#        -m apt -a "name=ansible state=present" \
+#        --become --user ubuntu \
+#        --extra-vars "ansible_user=ubuntu ansible_password=ubuntu ansible_ssh_pass=ubuntu ansible_become_pass=ubuntu" \
+#        -e 'ansible_python_interpreter=/usr/bin/python3'
 
 # Script continues after manual installation
 # SSH into the VM and install Ansible
@@ -151,3 +272,5 @@ qemu-system-x86_64 \
 
 # Enable and start Ansible service
 # ...
+
+echo 'SETUP OK'
