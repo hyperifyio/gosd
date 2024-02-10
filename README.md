@@ -43,6 +43,8 @@ cloud platform management.
 
 ## License
 
+Copyright (c) Heusala Group Ltd. All rights reserved.
+
 `gosd` is licensed under the HG Evaluation and Non-Commercial License (version 
 1). This license grants the right to use, modify, and distribute the software 
 solely for non-commercial and evaluation purposes for a period of two (2) years 
