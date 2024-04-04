@@ -14,12 +14,10 @@ to facilitate operations without complex configuration.
 ## Development
 
 `gosd` is currently in the development stage and is not yet a fully functioning 
-application. Ongoing development efforts are aimed at enhancing its features 
-and ensuring it meets our standards for simplicity and efficiency in managing 
-virtual servers and containers. We welcome you to track our progress and 
-contribute to the discussion by visiting [our issue tracker on 
-GitHub](https://github.com/hyperifyio/gosd/issues/1). Your feedback is 
-invaluable as we work towards completing `gosd`.
+application. We welcome you to track our progress and contribute to the 
+discussion by visiting 
+[our issue tracker on GitHub](https://github.com/hyperifyio/gosd/issues/1). 
+Your feedback is invaluable as we work towards completing `gosd`.
 
 ## Getting Started
 
