@@ -77,6 +77,27 @@ else
     fi
 fi
 
+# Check expect
+if which expect > /dev/null 2>/dev/null; then
+    :
+else
+    if [ "$(uname)" == "Darwin" ]; then
+        echo
+        echo 'No expect installed. You can install it using:'
+        echo
+        echo '  brew install expect'
+        echo
+        exit 1
+    elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
+        echo
+        echo 'No expect installed. You can install it using:'
+        echo
+        echo '  sudo apt-get install expect'
+        echo
+        exit 1
+    fi
+fi
+
 set -x
 set -e
 
