@@ -3,7 +3,7 @@
 # Copyright 2024 Heusala Group Ltd <info@hg.fi>
 #
 
-UBUNTU_ISO_URL='https://releases.ubuntu.com/22.04.3/ubuntu-22.04.3-live-server-amd64.iso'
+UBUNTU_ISO_URL='https://releases.ubuntu.com/22.04.4/ubuntu-22.04.4-live-server-amd64.iso'
 UBUNTU_SEED_ISO_FILE_NAME='ubuntu-seed.iso'
 SERVER_IMAGE_TYPE='qcow2'
 SERVER_IMAGE_FILE="ubuntu-server"
