@@ -29,7 +29,7 @@ else
         echo
         echo 'No QEMU installed. You can install it using:'
         echo
-        echo '  sudo apt-get install qemu'
+        echo '  sudo apt-get install qemu-system-x86'
         echo
         exit 1
     fi
