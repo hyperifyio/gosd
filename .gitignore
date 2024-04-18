@@ -1,5 +1,6 @@
 .idea
 downloads/*.iso
+downloads/*.xz
 images/*.qcow2
 output.log
 
